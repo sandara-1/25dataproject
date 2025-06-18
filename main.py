@@ -52,9 +52,9 @@ chart_type = st.sidebar.selectbox(
 subset = df[df["지역"].isin(selected)]
 agg = subset.groupby("지역")[age_cols].sum().T
 
-# 인덱스(‘…_0세’) → 숫자 추출 (예: '_계_0세' → 0)
+# 인덱스(‘…_0세’) → 숫자 추출
 agg.index = agg.index.str.extract(r"(\d+)").astype(int).squeeze()
-agg = agg.sort_index()  # 0, 1, 2, ..., 100
+agg = agg.sort_index()  # 0, 1, ..., 100
 
 # ---------- 🎨 시각화 ----------
 if chart_type.startswith("꺾은선"):
@@ -62,59 +62,65 @@ if chart_type.startswith("꺾은선"):
     for region in agg.columns:
         fig.add_trace(
             go.Scatter(
-                x=agg[region],       # 인구 수
-                y=agg.index,         # 나이
+                x=agg.index,         # 나이
+                y=agg[region],       # 인구 수
                 mode='lines+markers',
                 name=region
             )
         )
 
     fig.update_layout(
-        title="연령별 인구 분포 (세로축: 나이)",
-        xaxis_title="인구 수",
-        yaxis_title="나이(세)",
-        yaxis=dict(autorange="reversed"),  # 나이 작은 게 위로
-        height=800
+        title="연령별 인구 분포 (선 그래프)",
+        xaxis_title="나이(세)",
+        yaxis_title="인구 수",
+        hovermode="x unified",
+        height=600
     )
 
 else:
     if len(selected) == 1:
+        # 피라미드: 양쪽 대칭 막대 그래프
         pop = agg[selected[0]]
-        pop_neg = pop.copy()
-        pop_neg.iloc[pop.index >= 0] *= -1  # 왼쪽으로 보내기
-        pyr = pd.DataFrame({
-            "남녀합계(왼쪽)": pop_neg,
-            "남녀합계(오른쪽)": pop
+        half = len(pop) // 2
+        male = pop.iloc[:half]
+        female = pop.iloc[half:]
+        female.index = male.index  # 같은 나이대 맞추기
+
+        df_pyr = pd.DataFrame({
+            "나이": male.index,
+            "남성": male.values * -1,
+            "여성": female.values
         })
 
-        fig = px.bar(
-            pyr,
-            x=pyr.columns,
-            y=pyr.index,
-            orientation="h",
-            labels={"y": "나이(세)", "value": "인구 수"},
-            title=f"{selected[0]} 인구 피라미드"
-        )
+        df_pyr = df_pyr.sort_values(by="나이")
+
+        fig = go.Figure()
+        fig.add_bar(x=df_pyr["남성"], y=df_pyr["나이"], name="남성", orientation="h")
+        fig.add_bar(x=df_pyr["여성"], y=df_pyr["나이"], name="여성", orientation="h")
+
         fig.update_layout(
+            title=f"{selected[0]} 인구 피라미드",
+            xaxis_title="인구 수",
             yaxis_title="나이(세)",
-            yaxis=dict(autorange="reversed"),
+            barmode="relative",
             height=800
         )
 
     else:
+        # 다지역 비교용 막대 그래프
         agg_reset = agg.reset_index().rename(columns={"index": "나이"})
         fig = px.bar(
             agg_reset,
-            x=selected,
-            y="나이",
-            orientation="h",
+            x="나이",
+            y=selected,
             barmode="group",
             labels={"value": "인구 수", "나이": "나이(세)", "variable": "지역"},
             title="연령별 인구 분포 (막대 그래프)"
         )
         fig.update_layout(
-            yaxis=dict(autorange="reversed"),
-            height=800
+            xaxis_title="나이(세)",
+            yaxis_title="인구 수",
+            height=600
         )
 
 st.plotly_chart(fig, use_container_width=True)
