@@ -1,100 +1,66 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import koreanize_matplotlib   # 한글 폰트 깨짐 방지용 – 꼭 필요한 한 줄!
 
-st.set_page_config(page_title="🗺️ 지역별 인구 구조 대시보드", layout="wide")
+st.set_page_config(page_title="지역별 인구구조 시각화", layout="centered")
 
+st.title("📊 지역별 연령별 인구구조 시각화")
+st.write("출처: 통계청 / 2025년 5월 기준")
+
+# 데이터 불러오기
 @st.cache_data
-def load_data() -> tuple[pd.DataFrame, list]:
-    """
-    CSV를 읽어 ‘지역’ 칼럼을 추가하고, 연령별 숫자 칼럼을 정수형으로 바꾼 뒤
-    (age_cols, df) 형태로 리턴합니다.
-    """
-    df = pd.read_csv(
-        "202505_202505_연령별인구현황_월간.csv",
-        encoding="cp949"      # 행정안전부 원본 파일은 CP949 인코딩
-    )
+def load_data():
+    df = pd.read_csv("202505_202505_연령별인구현황_월간.csv", encoding="cp949")
+    df = df.rename(columns=lambda x: x.strip())  # 열 이름 공백 제거
+    return df
 
-    # '서울특별시 (1100000000)' → '서울특별시'
-    df["지역"] = df["행정구역"].str.split("(").str[0].str.strip()
+df = load_data()
 
-    # 연령별 칼럼 자동 탐색 : ‘…_계_0세’ 같은 패턴
-    age_cols = [c for c in df.columns if c.endswith("세") and "_계_" in c]
+# 시도 리스트 추출
+regions = df["행정기관"].unique()
+selected_region = st.selectbox("📍 지역 선택", regions)
 
-    # 천 단위 콤마 제거 후 int로 변환
-    for col in age_cols:
-        df[col] = (
-            df[col]
-            .astype(str)
-            .str.replace(",", "", regex=False)
-            .astype(int)
-        )
+# 선택한 지역의 데이터 필터링
+region_df = df[df["행정기관"] == selected_region]
 
-    return df, age_cols
+# 남성과 여성 데이터 분리 및 전처리
+male_df = region_df[region_df["성별"] == "남자"]
+female_df = region_df[region_df["성별"] == "여자"]
 
+# 연령별 인구 구성
+male_df["인구수"] = male_df["2025년05월_계"].str.replace(",", "").astype(int)
+female_df["인구수"] = -female_df["2025년05월_계"].str.replace(",", "").astype(int)  # 음수로 변환
 
-# ---------- 🌐 UI ----------
-st.title("🔍 지역별 인구 구조 대시보드")
-df, age_cols = load_data()
+pop_df = pd.DataFrame({
+    "연령": male_df["연령별"],
+    "남자": male_df["인구수"],
+    "여자": female_df["인구수"]
+})
 
-regions = sorted(df["지역"].unique())
-selected = st.sidebar.multiselect("✅ 분석할 지역(복수 선택 가능)", regions, default=["서울특별시"])
+# Melt 형태로 변환 (Plotly용)
+pop_df_melted = pd.melt(pop_df, id_vars="연령", var_name="성별", value_name="인구수")
 
-if not selected:
-    st.info("왼쪽 사이드바에서 최소 1개 지역을 선택하세요!")
-    st.stop()
+# 정렬
+pop_df_melted["연령"] = pd.Categorical(pop_df_melted["연령"], categories=male_df["연령별"], ordered=True)
+pop_df_melted = pop_df_melted.sort_values("연령")
 
-chart_type = st.sidebar.selectbox(
-    "차트 유형", ("꺾은선 그래프", "막대 그래프 (Population Pyramid용)")
+# 그래프 생성
+fig = px.bar(
+    pop_df_melted,
+    y="연령",
+    x="인구수",
+    color="성별",
+    orientation="h",
+    title=f"{selected_region}의 연령별 인구 구조 (2025년 5월)",
+    color_discrete_map={"남자": "blue", "여자": "red"},
+    labels={"인구수": "인구 수", "연령": "연령대"}
 )
 
-# ---------- 📊 데이터 가공 ----------
-subset = df[df["지역"].isin(selected)]
-agg = subset.groupby("지역")[age_cols].sum().T
-
-# 인덱스(‘…_0세’) → 순수 숫자만 추출
-agg.index = (
-    agg.index.str.extract(r"(\d+)").astype(int).squeeze()
+fig.update_layout(
+    yaxis=dict(title="연령대"),
+    xaxis=dict(title="인구 수", tickformat=","),
+    bargap=0.1,
+    height=800
 )
-agg = agg.sort_index()        # 0,1,2,…,99,100
 
-# ---------- 🎨 그래프 ----------
-if chart_type.startswith("꺾은선"):
-    fig = px.line(
-        agg,
-        x=agg.index,
-        y=agg.columns,
-        labels={"x": "나이(세)", "value": "인구 수", "variable": "지역"},
-        title="연령별 인구 분포 (선 그래프)"
-    )
-else:
-    # Population-pyramid 스타일: 하나만 선택 시 좌우 대칭, 여러 개면 그룹 막대
-    if len(selected) == 1:
-        pop = agg[selected[0]]
-        pop_neg = pop.copy()
-        pop_neg.iloc[pop.index >= 0] *= -1      # 왼쪽으로 뒤집기
-        pyr = pd.DataFrame({"남녀합계(왼쪽)": pop_neg, "남녀합계(오른쪽)": pop})
-        fig = px.bar(
-            pyr,
-            x=pyr.columns,
-            y=pyr.index,
-            orientation="h",
-            labels={"y": "나이(세)", "value": "인구 수"},
-            title=f"{selected[0]} 인구 피라미드"
-        )
-    else:
-        # 다지역 비교용 그룹 막대
-        fig = px.bar(
-            agg,
-            x=agg.index,
-            y=agg.columns,
-            barmode="group",
-            labels={"x": "나이(세)", "value": "인구 수", "variable": "지역"},
-            title="연령별 인구 분포 (막대 그래프)"
-        )
-
-fig.update_layout(hovermode="x unified")
 st.plotly_chart(fig, use_container_width=True)
-
-st.caption("데이터 출처: 행정안전부 주민등록 인구 통계")
