@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
+import koreanize_matplotlib   # 한글 폰트 깨짐 방지용 – 꼭 필요한 한 줄!
 
 st.set_page_config(page_title="🗺️ 지역별 인구 구조 대시보드", layout="wide")
 
@@ -19,17 +19,12 @@ def load_data() -> tuple[pd.DataFrame, list]:
     # '서울특별시 (1100000000)' → '서울특별시'
     df["지역"] = df["행정구역"].str.split("(").str[0].str.strip()
 
-    # 연령별 칼럼 자동 탐색
+    # 연령별 칼럼 자동 탐색 : ‘…_계_0세’ 같은 패턴
     age_cols = [c for c in df.columns if c.endswith("세") and "_계_" in c]
 
-    # 천 단위 콤마 제거 후 정수형으로 변환
+    # 천 단위 콤마 제거 후 int로 변환
     for col in age_cols:
-        df[col] = (
-            df[col]
-            .astype(str)
-            .str.replace(",", "", regex=False)
-            .astype(int)
-        )
+        df[col] = df[col].astype(str).str.replace(",", "", regex=False).astype(int)
 
     return df, age_cols
 
@@ -52,76 +47,44 @@ chart_type = st.sidebar.selectbox(
 subset = df[df["지역"].isin(selected)]
 agg = subset.groupby("지역")[age_cols].sum().T
 
-# 인덱스(‘…_0세’) → 숫자 추출
-agg.index = agg.index.str.extract(r"(\d+)").astype(int).squeeze()
-agg = agg.sort_index()  # 0, 1, ..., 100
+# 인덱스(‘…_0세’) → 숫자만 추출하여 정수형으로 (← 여기 수정됨)
+agg.index = agg.index.str.extract(r"(\d+)")[0].astype(int)
+agg = agg.sort_index()
 
-# ---------- 🎨 시각화 ----------
+# ---------- 🎨 그래프 ----------
 if chart_type.startswith("꺾은선"):
-    fig = go.Figure()
-    for region in agg.columns:
-        fig.add_trace(
-            go.Scatter(
-                x=agg.index,         # 나이
-                y=agg[region],       # 인구 수
-                mode='lines+markers',
-                name=region
-            )
-        )
-
-    fig.update_layout(
-        title="연령별 인구 분포 (선 그래프)",
-        xaxis_title="나이(세)",
-        yaxis_title="인구 수",
-        hovermode="x unified",
-        height=600
+    fig = px.line(
+        agg,
+        x=agg.index,
+        y=agg.columns,
+        labels={"x": "나이(세)", "value": "인구 수", "variable": "지역"},
+        title="연령별 인구 분포 (선 그래프)"
     )
-
 else:
     if len(selected) == 1:
-        # 피라미드: 양쪽 대칭 막대 그래프
         pop = agg[selected[0]]
-        half = len(pop) // 2
-        male = pop.iloc[:half]
-        female = pop.iloc[half:]
-        female.index = male.index  # 같은 나이대 맞추기
-
-        df_pyr = pd.DataFrame({
-            "나이": male.index,
-            "남성": male.values * -1,
-            "여성": female.values
-        })
-
-        df_pyr = df_pyr.sort_values(by="나이")
-
-        fig = go.Figure()
-        fig.add_bar(x=df_pyr["남성"], y=df_pyr["나이"], name="남성", orientation="h")
-        fig.add_bar(x=df_pyr["여성"], y=df_pyr["나이"], name="여성", orientation="h")
-
-        fig.update_layout(
-            title=f"{selected[0]} 인구 피라미드",
-            xaxis_title="인구 수",
-            yaxis_title="나이(세)",
-            barmode="relative",
-            height=800
-        )
-
-    else:
-        # 다지역 비교용 막대 그래프
-        agg_reset = agg.reset_index().rename(columns={"index": "나이"})
+        pop_neg = pop.copy()
+        pop_neg.iloc[pop.index >= 0] *= -1  # 좌우 대칭용
+        pyr = pd.DataFrame({"남녀합계(왼쪽)": pop_neg, "남녀합계(오른쪽)": pop})
         fig = px.bar(
-            agg_reset,
-            x="나이",
-            y=selected,
+            pyr,
+            x=pyr.columns,
+            y=pyr.index,
+            orientation="h",
+            labels={"y": "나이(세)", "value": "인구 수"},
+            title=f"{selected[0]} 인구 피라미드"
+        )
+    else:
+        fig = px.bar(
+            agg,
+            x=agg.index,
+            y=agg.columns,
             barmode="group",
-            labels={"value": "인구 수", "나이": "나이(세)", "variable": "지역"},
+            labels={"x": "나이(세)", "value": "인구 수", "variable": "지역"},
             title="연령별 인구 분포 (막대 그래프)"
         )
-        fig.update_layout(
-            xaxis_title="나이(세)",
-            yaxis_title="인구 수",
-            height=600
-        )
 
+fig.update_layout(hovermode="x unified")
 st.plotly_chart(fig, use_container_width=True)
+
 st.caption("데이터 출처: 행정안전부 주민등록 인구 통계")
