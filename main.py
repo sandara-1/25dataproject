@@ -1,90 +1,54 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import koreanize_matplotlib   # 한글 폰트 깨짐 방지용 – 꼭 필요한 한 줄!
 
-st.set_page_config(page_title="🗺️ 지역별 인구 구조 대시보드", layout="wide")
-
+# 데이터 불러오기
 @st.cache_data
-def load_data() -> tuple[pd.DataFrame, list]:
-    """
-    CSV를 읽어 ‘지역’ 칼럼을 추가하고, 연령별 숫자 칼럼을 정수형으로 바꾼 뒤
-    (age_cols, df) 형태로 리턴합니다.
-    """
-    df = pd.read_csv(
-        "202505_202505_연령별인구현황_월간.csv",
-        encoding="cp949"
-    )
+def load_data():
+    df = pd.read_csv("202505_202505_연령별인구현황_월간.csv", encoding="euc-kr")
+    return df
 
-    # '서울특별시 (1100000000)' → '서울특별시'
-    df["지역"] = df["행정구역"].str.split("(").str[0].str.strip()
+df = load_data()
 
-    # 연령별 칼럼 자동 탐색 : ‘…_계_0세’ 같은 패턴
-    age_cols = [c for c in df.columns if c.endswith("세") and "_계_" in c]
+# 전처리
+age_columns = [col for col in df.columns if "계_" in col and "세" in col]
+age_labels = [col.split("_")[-1].replace("세", "").replace(" ", "") for col in age_columns]
+df_age = df[["행정구역"] + age_columns].copy()
+df_age.columns = ["행정구역"] + age_labels
+df_age = df_age.melt(id_vars=["행정구역"], var_name="나이", value_name="인구수")
+df_age["나이"] = df_age["나이"].str.replace("이상", "").replace("100", "100").astype(int)
+df_age["인구수"] = df_age["인구수"].str.replace(",", "").astype(int)
 
-    # 천 단위 콤마 제거 후 int로 변환
-    for col in age_cols:
-        df[col] = df[col].astype(str).str.replace(",", "", regex=False).astype(int)
+# Streamlit UI
+st.set_page_config(page_title="연령별 인구 구조 시각화", layout="wide")
+st.title("📊 연령별 인구 구조 시각화")
+st.markdown("#### 원하는 **동 이름**을 검색하여 인구 구조를 확인해보세요.")
 
-    return df, age_cols
+# 검색창
+dong_options = sorted(df_age["행정구역"].unique())
+selected_dong = st.selectbox("행정구역 선택 (예: 서울특별시 종로구 사직동(1111053000))", dong_options)
 
-# ---------- 🌐 UI ----------
-st.title("🔍 지역별 인구 구조 대시보드")
-df, age_cols = load_data()
+# 선택된 동의 데이터 필터링
+filtered_df = df_age[df_age["행정구역"] == selected_dong]
 
-regions = sorted(df["지역"].unique())
-selected = st.sidebar.multiselect("✅ 분석할 지역(복수 선택 가능)", regions, default=["서울특별시"])
+# 전체 인구수
+total_population = filtered_df["인구수"].sum()
+filtered_df["비율(%)"] = (filtered_df["인구수"] / total_population * 100).round(2)
 
-if not selected:
-    st.info("왼쪽 사이드바에서 최소 1개 지역을 선택하세요!")
-    st.stop()
-
-chart_type = st.sidebar.selectbox(
-    "차트 유형", ("꺾은선 그래프", "막대 그래프 (Population Pyramid용)")
+# 그래프
+fig = px.bar(
+    filtered_df,
+    x="나이",
+    y="비율(%)",
+    hover_data=["인구수"],
+    title=f"{selected_dong}의 연령별 인구 비율 (총 인구: {total_population:,}명)",
+    labels={"나이": "연령", "비율(%)": "인구 비율 (%)"},
+    height=600
 )
+fig.update_layout(template="plotly_white")
 
-# ---------- 📊 데이터 가공 ----------
-subset = df[df["지역"].isin(selected)]
-agg = subset.groupby("지역")[age_cols].sum().T
-
-# 인덱스(‘…_0세’) → 숫자만 추출하여 정수형으로 (← 여기 수정됨)
-agg.index = agg.index.str.extract(r"(\d+)")[0].astype(int)
-agg = agg.sort_index()
-
-# ---------- 🎨 그래프 ----------
-if chart_type.startswith("꺾은선"):
-    fig = px.line(
-        agg,
-        x=agg.index,
-        y=agg.columns,
-        labels={"x": "나이(세)", "value": "인구 수", "variable": "지역"},
-        title="연령별 인구 분포 (선 그래프)"
-    )
-else:
-    if len(selected) == 1:
-        pop = agg[selected[0]]
-        pop_neg = pop.copy()
-        pop_neg.iloc[pop.index >= 0] *= -1  # 좌우 대칭용
-        pyr = pd.DataFrame({"남녀합계(왼쪽)": pop_neg, "남녀합계(오른쪽)": pop})
-        fig = px.bar(
-            pyr,
-            x=pyr.columns,
-            y=pyr.index,
-            orientation="h",
-            labels={"y": "나이(세)", "value": "인구 수"},
-            title=f"{selected[0]} 인구 피라미드"
-        )
-    else:
-        fig = px.bar(
-            agg,
-            x=agg.index,
-            y=agg.columns,
-            barmode="group",
-            labels={"x": "나이(세)", "value": "인구 수", "variable": "지역"},
-            title="연령별 인구 분포 (막대 그래프)"
-        )
-
-fig.update_layout(hovermode="x unified")
 st.plotly_chart(fig, use_container_width=True)
 
-st.caption("데이터 출처: 행정안전부 주민등록 인구 통계")
+# 하단 정보
+st.markdown("---")
+st.markdown("**🔍 데이터 출처**: 통계청 월간 연령별 인구현황 CSV")
