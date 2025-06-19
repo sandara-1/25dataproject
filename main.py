@@ -31,15 +31,26 @@ df_age["인구수"] = df_age["인구수"].astype(int)
 # 페이지 설정
 st.set_page_config(page_title="연령별 인구 구조 시각화", layout="wide")
 st.title("📊 연령별 인구 구조 시각화")
-st.markdown("**행정동을 선택하면 연령별 인구 비율이 오른쪽에 표시됩니다.**")
+st.markdown("**행정동과 나이를 선택하면 인구 비율과 해당 나이의 인구수를 확인할 수 있습니다.**")
 
 # 좌우 컬럼 분할
 col1, col2 = st.columns([1, 3])
 
 with col1:
-    st.subheader("🔍 행정동 선택")
+    st.subheader("🔍 행정동 및 나이 선택")
+
     dong_options = sorted(df_age["행정구역"].unique())
     selected_dong = st.selectbox("행정구역을 선택하세요", dong_options)
+
+    selected_age = st.slider("나이를 선택하세요", min_value=0, max_value=100, value=30)
+
+    # 선택된 행정동과 나이의 인구수 추출
+    pop = df_age[(df_age["행정구역"] == selected_dong) & (df_age["나이"] == selected_age)]["인구수"]
+
+    if not pop.empty:
+        st.markdown(f"📌 **{selected_dong}의 {selected_age}세 인구수:** `{pop.values[0]:,}명`")
+    else:
+        st.markdown("⚠️ 선택한 나이에 대한 인구 데이터가 없습니다.")
 
 with col2:
     filtered_df = df_age[df_age["행정구역"] == selected_dong]
