@@ -16,8 +16,14 @@ age_labels = [col.split("_")[-1].replace("세", "").replace(" ", "") for col in 
 df_age = df[["행정구역"] + age_columns].copy()
 df_age.columns = ["행정구역"] + age_labels
 df_age = df_age.melt(id_vars=["행정구역"], var_name="나이", value_name="인구수")
-df_age["나이"] = df_age["나이"].str.replace("이상", "").replace("100", "100").astype(int)
-df_age["인구수"] = df_age["인구수"].str.replace(",", "").astype(int)
+
+# 나이: '100세 이상' → 100으로 처리
+df_age["나이"] = df_age["나이"].str.replace("이상", "")
+df_age["나이"] = pd.to_numeric(df_age["나이"], errors="coerce")
+
+# 인구수: 쉼표 제거 후 숫자형으로 변환
+df_age["인구수"] = df_age["인구수"].astype(str).str.replace(",", "")
+df_age["인구수"] = pd.to_numeric(df_age["인구수"], errors="coerce").fillna(0).astype(int)
 
 # Streamlit UI
 st.set_page_config(page_title="연령별 인구 구조 시각화", layout="wide")
