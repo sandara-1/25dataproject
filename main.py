@@ -59,39 +59,39 @@ with col2:
 
     if len(valid_dongs) == 0:
         st.warning("⛔ 최소한 하나의 행정동을 선택해주세요.")
+    
     elif len(valid_dongs) == 1:
         dong = valid_dongs[0]
         single_df = df_age[df_age["행정구역"] == dong].copy()
         total_pop = single_df["인구수"].sum()
-        single_df["비율(%)"] = (single_df["인구수"] / total_pop * 100).round(2)
 
         fig = px.bar(
             single_df,
             x="나이",
-            y="비율(%)",
-            title=f"{dong}의 연령별 인구 비율 (총 인구: {total_pop:,}명)",
-            labels={"나이": "연령", "비율(%)": "인구 비율 (%)"},
+            y="인구수",
+            title=f"{dong}의 연령별 인구수 (총 인구: {total_pop:,}명)",
+            labels={"나이": "연령", "인구수": "인구수 (명)"},
             height=600,
         )
         fig.update_layout(template="plotly_white")
         st.plotly_chart(fig, use_container_width=True)
+
     else:
         compare_df = df_age[df_age["행정구역"].isin(valid_dongs)].copy()
-        total_by_dong = compare_df.groupby("행정구역")["인구수"].transform("sum")
-        compare_df["비율(%)"] = (compare_df["인구수"] / total_by_dong * 100).round(2)
 
         fig = px.bar(
             compare_df,
             x="나이",
-            y="비율(%)",
+            y="인구수",
             color="행정구역",
             barmode="group",
-            title=f"{valid_dongs[0]} vs {valid_dongs[1]} 연령별 인구 비율 비교",
-            labels={"나이": "연령", "비율(%)": "인구 비율 (%)"},
+            title=f"{valid_dongs[0]} vs {valid_dongs[1]} 연령별 인구수 비교",
+            labels={"나이": "연령", "인구수": "인구수 (명)"},
             height=600,
         )
         fig.update_layout(template="plotly_white")
         st.plotly_chart(fig, use_container_width=True)
+
 
 # 하단 정보
 st.markdown("---")
