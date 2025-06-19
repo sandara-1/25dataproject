@@ -2,3 +2,6 @@ streamlit
 pandas
 plotly
 koreanize-matplotlib
+streamlit>=1.35.0
+pandas>=2.0.0
+plotly>=5.21.0
